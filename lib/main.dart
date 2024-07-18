@@ -4,14 +4,13 @@ import 'dart:developer';
 import 'dart:io';
 import 'package:camera/camera.dart';
 import 'package:crypto/crypto.dart';
-import 'package:ffmpeg_kit_flutter_full/ffmpeg_kit.dart';
-import 'package:ffmpeg_kit_flutter_full/ffprobe_kit.dart';
-import 'package:ffmpeg_kit_flutter_full/return_code.dart';
+import 'package:ffmpeg_kit_flutter_full_gpl/ffmpeg_kit.dart';
+import 'package:ffmpeg_kit_flutter_full_gpl/ffprobe_kit.dart';
+import 'package:ffmpeg_kit_flutter_full_gpl/return_code.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
-import 'package:gallery_saver/gallery_saver.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:intl/intl.dart';
 import 'package:path_provider/path_provider.dart';
@@ -65,7 +64,7 @@ class _VerificationAppState extends State<VerificationApp> {
   }
 
   void initialize() async {
-    directory = (await getApplicationDocumentsDirectory());
+    directory = (await getExternalStorageDirectory())!;
     await determinePosition();
     await initializeCamera();
     setState(() {});
@@ -155,36 +154,30 @@ class _VerificationAppState extends State<VerificationApp> {
       await outputFile.delete();
     }
     Map<String, String> metadata = {
-      'title': 'Recorded Video',
+      'title': 'Video taken by $userID',
       'date': DateFormat('dd-MM-yyyy h:mm:ss a').format(startTime),
       'location': "${position?.latitude} ${position?.longitude}",
       'comment':
           'Video taken by $userID at Location - ${position!.latitude}, ${position!.longitude} on ${DateFormat('dd-MM-yyyy h:mm:ss a').format(startTime)}. Verification code is $verificationCode.',
     };
     String metadataString = metadata.entries.map((entry) => '-metadata ${entry.key}="${entry.value}"').join(' ');
-    String dateString = DateFormat('dd-MM-yyyy').format(startTime).replaceAll(':', '\\:');
-
-    final String command = '-i $recordedVideoPath -vf "drawtext=fontfile=$fontPath:'
-        'text=\'User ID\\: $userID\n${position!.latitude}, ${position!.longitude}\nVerification Code\\: $verificationCode\n$dateString %{pts\\:localtime\\:${startTime.millisecondsSinceEpoch ~/ 1000}\\:%I\\\\\\:%M\\\\\\:%S %p}\''
-        ':x=32:y=H-th-32:fontsize=36:fontcolor=white:line_spacing=20:'
-        'box=1:boxcolor=black@0.6:boxborderw=10" -c:v mpeg4 -q:v 2 -preset slow '
-        '$metadataString $outputPath';
-
-
-    final session = await FFmpegKit.execute(command);
-    final logs = await session.getLogs();
+    String command = '-i $recordedVideoPath $metadataString -codec copy $outputPath';
+    final stopWatch = Stopwatch();
+    stopWatch.start();
+    dynamic session = await FFmpegKit.execute(command);
+    dynamic logs = await session.getLogs();
     for (final l in logs) {
       log(l.getMessage());
     }
     if (ReturnCode.isSuccess(await session.getReturnCode())) {
-      await GallerySaver.saveVideo(outputPath);
-      showSnackBar(context, "Video saved");
-      log('hogayaa');
+      showSnackBar(context, "Video saved and time taken = ${stopWatch.elapsedMilliseconds / 1000} secs");
+      log('video saved');
       checkMetadata(outputPath);
     } else {
       showSnackBar(context, "Unable to save video");
       log('Error: Video creation failed');
     }
+    stopWatch.stop();
     setState(() {
       isProcessing = false;
     });
@@ -202,7 +195,7 @@ class _VerificationAppState extends State<VerificationApp> {
     for (final l in (await session.getLogs())) {
       log(l.getMessage());
     }
-    log(' ${session.getMediaInformation()?.getTags()}');
+    log('metatags-> ${session.getMediaInformation()?.getTags()}');
   }
 
   @override
@@ -216,36 +209,12 @@ class _VerificationAppState extends State<VerificationApp> {
             ? const Center(
                 child: CircularProgressIndicator(),
               )
-            : Stack(
-                children: [
-                  CameraPreview(controller!),
-                  if (isRecording)
-                    Positioned(
-                      bottom: 16,
-                      left: 16,
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 5),
-                        color: Colors.black54,
-                        child: StreamBuilder(
-                            stream: Stream.periodic(const Duration(seconds: 1)),
-                            builder: (context, snapshot) {
-                              return Text(
-                                'User ID: $userID\n${position == null ? 'loading..' : '${position!.latitude}, ${position!.longitude}'}\nVerification Code: $verificationCode \n${DateFormat('dd-MM-yyyy h:mm:ss a').format(DateTime.now())}',
-                                style: const TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 18,
-                                ),
-                              );
-                            }),
-                      ),
-                    ),
-                ],
-              ),
+            : CameraPreview(controller!),
         floatingActionButton: (isProcessing || position == null || controller == null || !controller!.value.isInitialized)
             ? null
             : Padding(
-              padding: const EdgeInsets.only(bottom: 40),
-              child: FloatingActionButton(
+                padding: const EdgeInsets.only(bottom: 40),
+                child: FloatingActionButton(
                   backgroundColor: isRecording ? Colors.red.shade100 : Colors.blue.shade100,
                   onPressed: !(controller == null || !controller!.value.isInitialized) ? (isRecording ? stopRecording : startRecording) : () {},
                   child: Icon(
@@ -253,7 +222,7 @@ class _VerificationAppState extends State<VerificationApp> {
                     color: isRecording ? Colors.red.shade300 : Colors.blue.shade400,
                   ),
                 ),
-            ),
+              ),
       ),
     );
   }
